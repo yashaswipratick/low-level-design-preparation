@@ -1,0 +1,10 @@
+# Local workspace artifacts
+
+# macOS
+.DS_Store
+
+.idea/
+
+target/
+
+*.class

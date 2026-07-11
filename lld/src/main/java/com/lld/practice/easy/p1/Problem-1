@@ -1,0 +1,56 @@
+1. **Library Book Catalog** - Design a system to add books, search by title/author, and mark copies as available or issued.
+
+class Book
+String id
+String title
+String author
+int totalCopies
+int issuedCopies
+
+Class User
+String id
+String name
+String email
+string mobileNo
+List<Book> issuedBooks
+
+class LibrarySystem
+Map<String, Book> bookCatalog
+Map<String, User> userCatalog
+Map<String, String> issuedBooks;
+
+search(String query) -> List<Book>
+    List<Book> result = new ArrayList();
+    for(Map.Entry<String, Book> entry : bookCatalog.entrySet()):
+        if(entry.getValue().title.equalsIgnoreCase(query) || entry.getValue().author.equalsIgnoreCase(query)) {
+            result.add(entry.getValue());
+        }
+    return result;
+
+addBook(Book book) -> void
+    map.put(book.id, book);
+
+issueBook(String bookId, String userId) -> void
+    if(bookCatalog.containsKey(bookId)):
+        Book book = bookCatalog.get(bookId);
+        int availableCopies = book.totalCopies - book.issuedCopies;
+        if(availableCopies > 0) {
+            book.issuedCopies = book.issuedCopies - 1;
+            bookCatalog.put(book.id, book);
+        } else {
+            System.out.println("No Copies Available");
+        }
+returnBook(String bookId, String userId) -> void
+    if(bookCatalog.containsKey(bookId)):
+            Book book = bookCatalog.get(bookId);
+            if(totalCopies > book.issuedCopies) {
+                book.issuedCopies = book.issuedCopies + 1;
+                bookCatalog.put(book.id, book);
+            } else {
+                System.out.println("total Copies smaller than issued Copies. Inventory mismatch");
+            }
+
+
+
+
+
