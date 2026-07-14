@@ -1,5 +1,6 @@
 package com.lld.practice.tutor_sessions.elevator.service;
 
+import com.lld.practice.tutor_sessions.elevator.exceptions.ElevatorDispatchException;
 import com.lld.practice.tutor_sessions.elevator.model.Direction;
 import com.lld.practice.tutor_sessions.elevator.model.Elevator;
 import com.lld.practice.tutor_sessions.elevator.model.ElevatorStatus;
@@ -40,33 +41,34 @@ public class DispatcherService {
 
             if (request.getDirection().equals(Direction.UP) && elevator.getElevatorStatus() == ElevatorStatus.MOVING_UPWARDS) {
                 isMovingDirection = true;
-                willCrossFloor = elevator.getFloor() <= request.getDestinationFloor();
+                willCrossFloor = elevator.getFloor() <= request.getSourceFloor();
             } else if (request.getDirection().equals(Direction.DOWN) && elevator.getElevatorStatus() == ElevatorStatus.MOVING_DOWNWARDS) {
                 isMovingDirection = true;
-                willCrossFloor = elevator.getFloor() >= request.getDestinationFloor();
+                willCrossFloor = elevator.getFloor() >= request.getSourceFloor();
             }
 
             if (isMovingDirection && willCrossFloor) {
                 primaryCandidate.add(elevator);
             }
-
-            // 4. If primary candidates exist, select best one
-            Elevator selectedElevator = null;
-            if (!primaryCandidate.isEmpty()) {
-                selectedElevator = findNearestElevator(primaryCandidate, request.getSourceFloor());
+        }
+        // 4. If primary candidates exist, select best one
+        Elevator selectedElevator = null;
+        if (!primaryCandidate.isEmpty()) {
+            selectedElevator = findNearestElevator(primaryCandidate, request.getSourceFloor());
+        } else {
+            List<Elevator> idleElevator = availableElevators.stream().filter(details -> details.getElevatorStatus() == ElevatorStatus.IDLE).toList();
+            if (!idleElevator.isEmpty()) {
+                selectedElevator = findNearestElevator(idleElevator, request.getSourceFloor());
             } else {
-                List<Elevator> idleElevator = availableElevators.stream().filter(details -> details.getElevatorStatus() == ElevatorStatus.IDLE).toList();
-                if (!idleElevator.isEmpty()) {
-                    selectedElevator = findNearestElevator(idleElevator, request.getSourceFloor());
-                } else {
-                    selectedElevator = findNearestElevator(availableElevators, request.getSourceFloor());
-                }
-            }
-            if (selectedElevator != null) {
-                selectedElevator.getRequests().add(request);
-                request.setRequestStatus(RequestStatus.ASSIGNED);
+                selectedElevator = findNearestElevator(availableElevators, request.getSourceFloor());
             }
         }
+
+        if (selectedElevator == null) {
+            throw new ElevatorDispatchException("No eligible elevator available for request");
+        }
+        selectedElevator.getRequests().add(request);
+        request.setRequestStatus(RequestStatus.ASSIGNED);
         return request;
     }
 
