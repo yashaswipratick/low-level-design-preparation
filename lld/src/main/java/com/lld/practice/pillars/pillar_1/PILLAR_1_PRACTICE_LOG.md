@@ -346,6 +346,48 @@ Q4 [NOT]:   Out of scope — authentication, image/video upload infra,
 
 ## Domain-Specific Cheats (quick lookup before any drill)
 
+### Common Actors by Problem Domain
+
+| Domain | Primary Actors | Secondary Actors | System Actors |
+|--------|----------------|------------------|---------------|
+| **Food Delivery** | Customer, Delivery Partner, Restaurant | Support Staff | Payment Gateway, Route Optimizer, Notification Service |
+| **URL Shortener** | End User | Admin (who manages URLs) | Analytics Service, Abuse Detection |
+| **Vending Machine** | Customer/Buyer | Operator/Refiller, Admin | Payment Validator, Inventory Tracker |
+| **Hotel Booking** | Guest, Receptionist | Hotel Manager | Payment Gateway, Housekeeping System |
+| **ATM System** | Account Holder | Bank Staff | Bank Server, Card Validator, Cash Dispenser |
+| **Library** | Member (borrower), Librarian | Library Manager | Fine Calculator, Notification Service |
+| **Parking Lot** | Driver (Car owner) | Parking Attendant | Payment Gateway, Entry/Exit System, Sensor System |
+| **Elevator** | Passenger | Building Manager | Maintenance System, Monitoring Service |
+| **KV Store / Cache** | Application Service | DevOps/Admin | Monitoring Service, Backup/Snapshot Service |
+| **Tic-Tac-Toe / Chess** | Player (human) | Spectator | Game Engine, Timer Service, AI Opponent |
+| **Online Learning** | Student, Instructor | Platform Admin | Payment Gateway, Video CDN, Certificate Generator |
+| **Twitter/X Social Feed** | Logged-in User, Anonymous Viewer | Content Moderator, Admin | Notification Service, Recommendation Engine, Ad Server |
+| **Movie Booking** | Customer | Theater Manager, Admin | Payment Gateway, Seat Allocation System |
+| **E-commerce / Cart** | Customer, Seller | Admin, Support | Payment Gateway, Inventory System, Shipping API, Recommendation Engine |
+| **Chat / Messaging** | Sender, Receiver | Moderator | Notification Service, Media Storage, Encryption Service |
+| **File Storage (Dropbox)** | User, Collaborator | Admin | Sync Engine, Virus Scanner, Preview Generator |
+| **Stock Exchange** | Trader, Investor | Broker, Regulator | Market Data Feed, Settlement System, Risk Engine |
+| **Notification System** | Application Service | Admin | Provider APIs (FCM/APNS/Twilio), Template Engine |
+| **Calendar / Meeting Scheduler** | Organizer, Attendee | Admin | Email/SMS Service, Timezone Converter |
+| **Music / Video Streaming** | Subscriber, Free User | Content Manager, Admin | CDN, DRM Service, Recommendation Engine |
+| **Airbnb / Rental Platform** | Guest, Host | Support Agent | Payment Gateway, Messaging Service, Review System |
+| **Ride-sharing (Uber/Lyft)** | Rider, Driver | Support Agent | Pricing Service, Matching Algorithm, Map Service, Payment Gateway |
+| **Splitwise / Expense Tracker** | User (who splits) | - | Payment Settlement Service, Currency Converter |
+| **Logger / Monitoring** | Application Service | DevOps/SRE | Log Aggregation, Alerting Service |
+| **Rate Limiter** | API Consumer | Platform Admin | Redis/Distributed Store, Monitoring Dashboard |
+| **Snake & Ladder / Board Game** | Player | - | Dice Service, Board Manager |
+| **Tournament / Leaderboard** | Player, Team | Tournament Organizer | Matchmaking Service, Rating Calculator (ELO) |
+
+**How to use this table:**
+1. Look up your problem domain
+2. Start with Primary Actors for v1 (must-have)
+3. Add Secondary Actors if mentioned in requirements
+4. Include System Actors only if they have distinct behavior/state (not just "called APIs")
+
+---
+
+### NOT-Scope Quick Reference
+
 | Domain | Always include in NOT-scope | Auth status |
 |---|---|---|
 | Booking systems (hotel, flight, movie) | Payment, notifications | Optional |
