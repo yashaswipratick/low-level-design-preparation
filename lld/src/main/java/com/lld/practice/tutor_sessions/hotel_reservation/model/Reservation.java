@@ -9,7 +9,7 @@ import java.util.List;
 public class Reservation {
 
     private String id;
-    private Guest guest;
+    private List<Guest> guests;
     private List<Room> rooms;
     private LocalDate checkInDate;
     private LocalDate checkOutDate;
@@ -18,10 +18,14 @@ public class Reservation {
     private LocalDate bookingDate;
     private ReservationStatus reservationStatus;
 
-    public Reservation(String id, Guest guest, List<Room> rooms, LocalDate bookingDate, ReservationStatus reservationStatus) {
+    public Reservation(String id, List<Guest> guests, List<Room> rooms, LocalDate checkInDate, LocalDate checkOutDate, LocalDateTime checkInTime, LocalDateTime checkOutTime, LocalDate bookingDate, ReservationStatus reservationStatus) {
         this.id = id;
-        this.guest = guest;
+        this.guests = guests;
         this.rooms = rooms;
+        this.checkInDate = checkInDate;
+        this.checkOutDate = checkOutDate;
+        this.checkInTime = checkInTime;
+        this.checkOutTime = checkOutTime;
         this.bookingDate = bookingDate;
         this.reservationStatus = reservationStatus;
     }
@@ -34,12 +38,12 @@ public class Reservation {
         this.id = id;
     }
 
-    public Guest getGuest() {
-        return guest;
+    public List<Guest> getGuests() {
+        return guests;
     }
 
-    public void setGuest(Guest guest) {
-        this.guest = guest;
+    public void setGuests(List<Guest> guests) {
+        this.guests = guests;
     }
 
     public List<Room> getRooms() {
@@ -102,7 +106,7 @@ public class Reservation {
     public String toString() {
         return "Reservation{" +
                 "id='" + id + '\'' +
-                ", guest=" + guest +
+                ", guests=" + guests +
                 ", rooms=" + rooms +
                 ", checkInDate=" + checkInDate +
                 ", checkOutDate=" + checkOutDate +

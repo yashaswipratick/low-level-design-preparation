@@ -4,20 +4,24 @@ import com.lld.practice.tutor_sessions.hotel_reservation.enums.NotificationEvent
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.NotificationTypeStatus;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class Notification {
 
     private String id;
-    private String guestId;
+    private List<Guest> guests;
     private NotificationEvent notificationEvent;
     private String message;
     private NotificationTypeStatus notificationTypeStatus;
     private LocalDateTime createdDate;
     private LocalDateTime modifiedDate;
 
-    public Notification(String id, String guestId, NotificationEvent notificationEvent, String message, NotificationTypeStatus notificationTypeStatus, LocalDateTime createdDate, LocalDateTime modifiedDate) {
+    public Notification() {
+    }
+
+    public Notification(String id, List<Guest> guests, NotificationEvent notificationEvent, String message, NotificationTypeStatus notificationTypeStatus, LocalDateTime createdDate, LocalDateTime modifiedDate) {
         this.id = id;
-        this.guestId = guestId;
+        this.guests = guests;
         this.notificationEvent = notificationEvent;
         this.message = message;
         this.notificationTypeStatus = notificationTypeStatus;
@@ -33,12 +37,12 @@ public class Notification {
         this.id = id;
     }
 
-    public String getGuestId() {
-        return guestId;
+    public List<Guest> getGuests() {
+        return guests;
     }
 
-    public void setGuestId(String guestId) {
-        this.guestId = guestId;
+    public void setGuests(List<Guest> guests) {
+        this.guests = guests;
     }
 
     public NotificationEvent getNotificationEvent() {
@@ -85,7 +89,7 @@ public class Notification {
     public String toString() {
         return "Notification{" +
                 "id='" + id + '\'' +
-                ", guestId='" + guestId + '\'' +
+                ", guests=" + guests +
                 ", notificationEvent=" + notificationEvent +
                 ", message='" + message + '\'' +
                 ", notificationTypeStatus=" + notificationTypeStatus +
