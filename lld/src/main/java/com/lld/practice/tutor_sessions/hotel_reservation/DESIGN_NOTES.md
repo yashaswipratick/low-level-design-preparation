@@ -242,3 +242,196 @@ CORRECT — release old locks first, then acquire new locks:
 | Double-check needed | No | Yes — critical |
 | Suitable for | v1 / interviews | v2 / production |
 
+
+---
+
+## 🎓 DESIGN PATTERN GUIDE — Identification & Application
+
+### HOW TO IDENTIFY PATTERNS IN AN INTERVIEW (The 7 Lenses)
+
+> Before coding, scan your system through each lens. If a lens "fits", that pattern applies.
+
+| Lens (What you see in the system) | Pattern to use | Interview trigger phrase |
+|----------------------------------|---------------|------------------------|
+| **Multiple algorithms for same task** (search, pricing, sorting) | Strategy | "I want the algorithm to be pluggable / swappable at runtime" |
+| **Object changes behaviour based on its state** (Reservation: RESERVED → CHECKED_IN → CANCELLED) | State | "Each state has different rules for what's allowed" |
+| **One event should notify multiple listeners** (booking confirmed → email + SMS + push) | Observer | "When X happens, N things need to react" |
+| **Creating objects of related types** (rooms: DELUXE, PREMIUM, SUITE) | Factory / Abstract Factory | "I want to decouple object creation from usage" |
+| **Add features without changing existing class** (add logging to NotificationService) | Decorator | "Open/Closed principle — extend without modifying" |
+| **Chain of checks / handlers in sequence** (validation: null check → business check → fraud check) | Chain of Responsibility | "Each handler decides to process or pass to next" |
+| **Single shared global instance** (HotelDataStore, configuration) | Singleton | "There should only ever be ONE instance" |
+
+---
+
+### HOTEL RESERVATION SYSTEM — PATTERN ANALYSIS
+
+#### Step 1: Scan through each lens
+
+| Lens | What we see in Hotel Reservation | Pattern? |
+|------|----------------------------------|---------|
+| Multiple algorithms? | How rooms are selected (first available, cheapest, by type) | ✅ **Strategy** |
+| State-based behaviour? | Reservation: RESERVED→CHECKED_IN→CHECKED_OUT / CANCELLED | ✅ **State** |
+| One-to-many notification? | Booking confirmed → Email, SMS, Push all need to be notified | ✅ **Observer** |
+| Creating related objects? | Room types: DELUXE, SUPER_DELUXE, PREMIUM | ✅ **Factory** (v3) |
+| Add features without change? | Add retry / logging to NotificationService | ✅ **Decorator** (v3) |
+| Chain of checks? | reserve() validates: null → dates → availability → capacity | ✅ **Chain of Responsibility** (v3) |
+| Single shared instance? | HotelDataStore shared across all services | ✅ **Singleton** (already partial) |
+
+#### Step 2: Priority for interview (45-min window)
+
+**Implement NOW (v2 — most impactful for Staff level):**
+
+| # | Pattern | Why it's important here |
+|---|---------|------------------------|
+| 1 | **Observer** | NotificationService is currently tightly coupled — hardcoded in every service method. Observer decouples it properly |
+| 2 | **State** | Reservation lifecycle has invalid transitions (can't cancel a CHECKED_OUT reservation). State pattern enforces this |
+| 3 | **Strategy** | Room selection is hardcoded (`ceil(guests/2)` picks first N). Strategy makes it pluggable |
+
+**Defer to v3 (mention, don't implement):**
+- Factory: room type creation
+- Decorator: notification retry/logging
+- Chain of Responsibility: validation chain
+
+---
+
+### PATTERN 1: Observer — NotificationService Decoupling
+
+#### Problem (current code):
+```java
+// In HotelReservationServiceImpl.reserve():
+notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Successful");
+
+// In cancelReservation():
+notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Cancelled");
+
+// In CheckInServiceImpl.checkIn():
+notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Checked In");
+```
+**Issue:** Every service class is directly calling NotificationService. Adding SMS/Push requires changing EVERY service class. Violates Open/Closed Principle.
+
+#### Solution (Observer):
+```
+ReservationEventPublisher  ←── publishes events
+        │
+        ├── EmailNotificationObserver  → sends email
+        ├── SmsNotificationObserver    → sends SMS  (v3)
+        └── PushNotificationObserver   → sends push (v3)
+```
+
+#### Interview narration:
+> "Currently notification is tightly coupled — every service directly calls NotificationService.
+> If I add SMS, I'd have to touch 5 files. Using Observer pattern, I publish a ReservationEvent,
+> and any observer (Email, SMS, Push) subscribes independently.
+> Adding a new channel = add one Observer class, zero changes to existing services."
+
+#### What to implement:
+```java
+// 1. ReservationEvent (the event object)
+// 2. ReservationObserver (interface: void onEvent(ReservationEvent))
+// 3. ReservationEventPublisher (holds List<ReservationObserver>, publishes to all)
+// 4. EmailNotificationObserver implements ReservationObserver
+// 5. Inject publisher into services, replace direct trackNotification calls
+```
+
+---
+
+### PATTERN 2: State — Reservation Lifecycle Enforcement
+
+#### Problem (current code):
+```java
+// Currently no guard on invalid transitions:
+reservation.setReservationStatus(ReservationStatus.CANCELLED); // works even if CHECKED_OUT!
+reservation.setReservationStatus(ReservationStatus.CHECKED_IN); // works even if already CHECKED_IN!
+```
+**Issue:** Any code can set any status. Invalid transitions like CHECKED_OUT → CANCELLED are allowed.
+
+#### Solution (State):
+```
+ReservationState (interface)
+    ├── ReservedState     → allows: checkIn(), cancel(), modify()   | blocks: checkOut()
+    ├── CheckedInState    → allows: checkOut()                      | blocks: cancel(), checkIn()
+    ├── CheckedOutState   → allows: nothing (terminal)              | blocks: everything
+    └── CancelledState    → allows: nothing (terminal)              | blocks: everything
+```
+
+#### Valid transitions:
+```
+RESERVED ──────→ CHECKED_IN ──→ CHECKED_OUT (terminal)
+    │
+    └──────────→ CANCELLED (terminal)
+```
+
+#### Interview narration:
+> "Currently any code can set any reservation status — there's no enforcement of valid transitions.
+> State pattern gives each status its own class with explicit allowed operations.
+> Trying to cancel a checked-out reservation throws a domain exception immediately.
+> Interviewers love this because it shows you think about invariants, not just happy path."
+
+#### What to implement:
+```java
+// 1. ReservationState (interface: checkIn(), checkOut(), cancel(), modify())
+// 2. ReservedState, CheckedInState, CheckedOutState, CancelledState (4 classes)
+// 3. Reservation holds currentState, delegates to it
+// 4. Each state throws HotelBookingException for invalid transitions
+```
+
+---
+
+### PATTERN 3: Strategy — Pluggable Room Selection
+
+#### Problem (current code):
+```java
+// Hardcoded in reserve():
+int numberOfRooms = (int) Math.ceil(guest.size() / 2.0);
+List<Room> bookedRoom = availableRooms.subList(0, numberOfRooms);
+```
+**Issue:** Room selection is hardcoded. Can't switch to "cheapest room" or "by room type" without changing service logic.
+
+#### Solution (Strategy):
+```
+RoomSelectionStrategy (interface: List<Room> select(List<Room> available, List<Guest> guests))
+    ├── DefaultSelectionStrategy    → ceil(guests/2) rooms, first available
+    ├── CheapestRoomStrategy        → sort by pricePerNight, pick cheapest
+    └── RoomTypePreferenceStrategy  → pick rooms matching requested type
+```
+
+#### Interview narration:
+> "Currently room selection is hardcoded — always picks first N available rooms.
+> Strategy pattern makes the algorithm a first-class citizen.
+> We can inject CheapestRoomStrategy or RoomTypePreferenceStrategy at runtime.
+> Trade-off: adds abstraction — justified when selection logic is likely to vary."
+
+#### What to implement:
+```java
+// 1. RoomSelectionStrategy (interface: List<Room> select(List<Room>, List<Guest>))
+// 2. DefaultSelectionStrategy (current logic extracted)
+// 3. CheapestRoomStrategy (sort by price, take N)
+// 4. Inject strategy into HotelReservationServiceImpl constructor
+```
+
+---
+
+### IMPLEMENTATION ORDER (follow this sequence)
+
+```
+Step 1: Observer Pattern   → you implement → I review
+Step 2: State Pattern      → you implement → I review  
+Step 3: Strategy Pattern   → you implement → I review
+```
+
+---
+
+### DESIGN PATTERN INTERVIEW CHECKLIST
+
+Before starting to code a pattern, always state:
+
+```
+1. PROBLEM:    "Currently the code does X, which causes Y problem"
+2. PATTERN:    "I'll use [Pattern Name] to solve this"  
+3. STRUCTURE:  "The structure will be: Interface + ConcreteA + ConcreteB + ..."
+4. WIRING:     "Service X will use it by ..."
+5. TRADE-OFF:  "This adds complexity, justified because ..."
+```
+
+**Never jump to code without stating the problem first. Interviewers want to see your reasoning.
+
