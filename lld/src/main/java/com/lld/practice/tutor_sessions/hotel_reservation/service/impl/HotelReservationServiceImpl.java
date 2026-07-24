@@ -5,7 +5,6 @@ import com.lld.practice.tutor_sessions.hotel_reservation.enums.ReservationStatus
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.RoomStatus;
 import com.lld.practice.tutor_sessions.hotel_reservation.exception.HotelBookingException;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Guest;
-import com.lld.practice.tutor_sessions.hotel_reservation.model.Notification;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Room;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservationService;
@@ -14,43 +13,58 @@ import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
 import com.lld.practice.tutor_sessions.hotel_reservation.validator.HotelBookingServiceValidator;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class HotelReservationServiceImpl implements HotelReservationService {
 
     private final Map<String, Reservation> reservations;
     private final Map<String, Room> rooms;
+    private final ConcurrentHashMap<String, ReentrantLock> roomLocks;
     private final NotificationService notificationService;
+    private final ReentrantLock lock = new ReentrantLock(); // global lock for non-room operations
 
     // HotelDataStore is injected — same instance shared across all services
     public HotelReservationServiceImpl(HotelDataStore dataStore, NotificationService notificationService) {
         this.reservations = dataStore.getReservations();
         this.rooms = dataStore.getRooms();
+        this.roomLocks = dataStore.getRoomLocks();
         this.notificationService = notificationService;
     }
 
 
     @Override
     public List<Room> searchAvailableRooms(LocalDate checkIn, LocalDate checkOut) {
-        String validate = HotelBookingServiceValidator.validateSearchRooms(checkIn, checkOut, rooms, reservations);
-        if (validate != null) {
-            throw new IllegalArgumentException(validate);
-        }
-        List<Room> bookedRooms = reservations.values().stream()
-                .filter(reservation ->
-                        // Reservations that OVERLAP with requested dates
-                        !reservation.getCheckOutDate().isBefore(checkIn) &&
-                                !reservation.getCheckInDate().isAfter(checkOut))
-                .flatMap(reservation -> reservation.getRooms().stream())
-                .toList();
+        lock.lock();
+        try {
+            String validate = HotelBookingServiceValidator.validateSearchRooms(checkIn, checkOut, rooms, reservations);
+            if (validate != null) {
+                throw new IllegalArgumentException(validate);
+            }
+            List<Room> bookedRooms = reservations.values().stream()
+                    .filter(reservation ->
+                            // Reservations that OVERLAP with requested dates
+                            !reservation.getCheckOutDate().isBefore(checkIn) &&
+                                    !reservation.getCheckInDate().isAfter(checkOut))
+                    .flatMap(reservation -> reservation.getRooms().stream())
+                    .toList();
 
-        return rooms.values().stream()
-                .filter(room -> room.getRoomStatus() == RoomStatus.AVAILABLE)
-                .filter(room -> bookedRooms.stream()
-                        .noneMatch(booked -> booked.getId().equals(room.getId())))
-                .toList();
+            return rooms.values().stream()
+                    .filter(room -> room.getRoomStatus() == RoomStatus.AVAILABLE)
+                    .filter(room -> bookedRooms.stream()
+                            .noneMatch(booked -> booked.getId().equals(room.getId())))
+                    .toList();
+        } finally {
+            lock.unlock();
+        }
     }
 
     @Override
@@ -61,87 +75,127 @@ public class HotelReservationServiceImpl implements HotelReservationService {
         if (checkIn == null || checkIn.isAfter(checkOut)) {
             throw new IllegalArgumentException("checkin is null OR checkin is after checkOut");
         }
-
         if (checkOut == null || checkOut.isBefore(checkIn)) {
             throw new IllegalArgumentException("check out is null OR check out is after checkIn");
         }
 
+        // Step 1: Find available rooms (no lock needed — just a snapshot)
         List<Room> availableRooms = searchAvailableRooms(checkIn, checkOut);
-
         if (availableRooms.isEmpty()) {
             throw new HotelBookingException("No available rooms for the given dates");
         }
 
         int numberOfRooms = (int) Math.ceil(guest.size() / 2.0);
-        List<Room> bookedRoom = availableRooms.subList(0, numberOfRooms);
-        Reservation reservation = new Reservation(UUID.randomUUID().toString(),
-                guest, bookedRoom, checkIn, checkOut, null, null,
-                LocalDate.now(), ReservationStatus.RESERVED);
-        bookedRoom.forEach(room -> room.setRoomStatus(RoomStatus.BOOKED));
+        // Step 2: Pick candidate rooms
+        List<Room> candidateRooms = new ArrayList<>(availableRooms.subList(0, numberOfRooms));
 
-        reservations.put(reservation.getId(), reservation);
-        notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Successful");
+        // Step 3: Sort by roomId — DEADLOCK PREVENTION
+        // Always acquire locks in same order across all threads
+        candidateRooms.sort(Comparator.comparing(Room::getId));
 
-        return reservation;
+        // Step 4: Acquire per-room locks in sorted order
+        List<ReentrantLock> acquiredLocks = new ArrayList<>();
+        try {
+            for (Room room : candidateRooms) {
+                // computeIfAbsent is atomic — creates lock if not present
+                ReentrantLock roomLock = roomLocks.computeIfAbsent(room.getId(), id -> new ReentrantLock());
+                roomLock.lock();
+                acquiredLocks.add(roomLock);
+            }
+
+            // Step 5: Double-check availability under lock
+            // Another thread may have booked a room between step 1 and step 4
+            for (Room room : candidateRooms) {
+                if (room.getRoomStatus() != RoomStatus.AVAILABLE) {
+                    throw new HotelBookingException("Room " + room.getId() + " was just booked by another guest. Please search again.");
+                }
+            }
+
+            // Step 6: All rooms still available — book them
+            Reservation reservation = new Reservation(UUID.randomUUID().toString(),
+                    guest, candidateRooms, checkIn, checkOut, null, null,
+                    LocalDate.now(), ReservationStatus.RESERVED);
+            candidateRooms.forEach(room -> room.setRoomStatus(RoomStatus.BOOKED));
+            reservations.put(reservation.getId(), reservation);
+            notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Successful");
+            return reservation;
+
+        } finally {
+            // Step 7: Always release ALL acquired locks
+            acquiredLocks.forEach(ReentrantLock::unlock);
+        }
     }
 
     @Override
     public Reservation cancelReservation(String reservationId) {
-        if (reservations.isEmpty()) {
-            throw new HotelBookingException("No reservations found");
-        }
+        lock.lock();
+        try {
+            if (reservationId == null) {
+                throw new IllegalArgumentException("reservationId is null");
+            }
 
-        if (reservationId == null) {
-            throw new IllegalArgumentException("reservationId is null");
-        }
+            if (reservations.isEmpty()) {
+                throw new HotelBookingException("No reservations found");
+            }
 
-        if (!reservations.containsKey(reservationId)) {
-            throw new HotelBookingException("reservationId not found");
+            if (!reservations.containsKey(reservationId)) {
+                throw new HotelBookingException("reservationId not found");
+            }
+            Reservation reservation = reservations.get(reservationId);
+            reservation.getRooms().forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
+            reservation.setReservationStatus(ReservationStatus.CANCELLED);
+            reservations.remove(reservationId);
+            notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Cancelled");
+            return reservation;
+        } finally {
+            lock.unlock();
         }
-
-        Reservation reservation = reservations.get(reservationId);
-        reservation.getRooms().forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
-        reservation.setReservationStatus(ReservationStatus.CANCELLED);
-        reservations.remove(reservationId);
-        notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Cancelled");
-        return reservation;
     }
 
     @Override
     public Reservation modifyReservation(String reservationId, LocalDate newCheckIn, LocalDate newCheckOut) {
-        if (reservations.isEmpty()) {
-            throw new IllegalArgumentException("No reservations found");
-        }
+        lock.lock();
+        try {
+            if (reservationId == null) {
+                throw new IllegalArgumentException("reservationId is null");
+            }
 
-        if (reservationId == null) {
-            throw new IllegalArgumentException("reservationId is null");
-        }
+            if (reservations.isEmpty()) {
+                throw new IllegalArgumentException("No reservations found");
+            }
 
-        if (!reservations.containsKey(reservationId)) {
-            throw new IllegalArgumentException("reservationId not found");
+            if (!reservations.containsKey(reservationId)) {
+                throw new IllegalArgumentException("reservationId not found");
+            }
+            Reservation reservation = reservations.get(reservationId);
+            reservation.getRooms().forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
+            reservations.remove(reservationId);  // remove old before creating new
+            Reservation reserve = reserve(reservation.getGuests(), newCheckIn, newCheckOut);
+            notificationService.trackNotification(reserve, NotificationTypeStatus.EMAIL, "Reservation Modified");
+            return reserve;
+        } finally {
+            lock.unlock();
         }
-
-        Reservation reservation = reservations.get(reservationId);
-        reservation.getRooms().forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
-        reservations.remove(reservationId);  // remove old before creating new
-        Reservation reserve = reserve(reservation.getGuests(), newCheckIn, newCheckOut);
-        notificationService.trackNotification(reserve, NotificationTypeStatus.EMAIL, "Reservation Modified");
-        return reserve;
     }
 
     @Override
     public Reservation viewReservation(String reservationId) {
-        if (reservations.isEmpty()) {
-            throw new IllegalArgumentException("No reservations found");
-        }
+        lock.lock();
+        try {
+            if (reservationId == null) {
+                throw new IllegalArgumentException("reservationId is null");
+            }
 
-        if (reservationId == null) {
-            throw new IllegalArgumentException("reservationId is null");
-        }
+            if (reservations.isEmpty()) {
+                throw new IllegalArgumentException("No reservations found");
+            }
 
-        if (!reservations.containsKey(reservationId)) {
-            throw new IllegalArgumentException("reservationId not found");
+            if (!reservations.containsKey(reservationId)) {
+                throw new IllegalArgumentException("reservationId not found");
+            }
+            return reservations.get(reservationId);
+        } finally {
+            lock.unlock();
         }
-        return reservations.get(reservationId);
     }
 }
