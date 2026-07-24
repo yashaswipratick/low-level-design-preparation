@@ -1,6 +1,7 @@
 package com.lld.practice.tutor_sessions.hotel_reservation.model;
 
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.ReservationStatus;
+import com.lld.practice.tutor_sessions.hotel_reservation.state.ReservationState;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -17,8 +18,9 @@ public class Reservation {
     private LocalDateTime checkOutTime;
     private LocalDate bookingDate;
     private ReservationStatus reservationStatus;
+    private ReservationState reservationState;
 
-    public Reservation(String id, List<Guest> guests, List<Room> rooms, LocalDate checkInDate, LocalDate checkOutDate, LocalDateTime checkInTime, LocalDateTime checkOutTime, LocalDate bookingDate, ReservationStatus reservationStatus) {
+    public Reservation(String id, List<Guest> guests, List<Room> rooms, LocalDate checkInDate, LocalDate checkOutDate, LocalDateTime checkInTime, LocalDateTime checkOutTime, LocalDate bookingDate, ReservationStatus reservationStatus, ReservationState reservationState) {
         this.id = id;
         this.guests = guests;
         this.rooms = rooms;
@@ -28,6 +30,7 @@ public class Reservation {
         this.checkOutTime = checkOutTime;
         this.bookingDate = bookingDate;
         this.reservationStatus = reservationStatus;
+        this.reservationState = reservationState;
     }
 
     public String getId() {
@@ -100,6 +103,14 @@ public class Reservation {
 
     public void setReservationStatus(ReservationStatus reservationStatus) {
         this.reservationStatus = reservationStatus;
+    }
+
+    public ReservationState getReservationState() {
+        return reservationState;
+    }
+
+    public void setReservationState(ReservationState reservationState) {
+        this.reservationState = reservationState;
     }
 
     @Override

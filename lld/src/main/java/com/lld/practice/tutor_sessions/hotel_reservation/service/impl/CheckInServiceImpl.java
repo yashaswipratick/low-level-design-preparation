@@ -41,10 +41,7 @@ public class CheckInServiceImpl implements CheckInService {
         }
 
         Reservation reservation = reservations.get(reservationId);
-        if (reservation.getReservationStatus() != ReservationStatus.RESERVED) {
-            throw new HotelBookingException("Cannot check-in. Reservation status is: " + reservation.getReservationStatus());
-        }
-        reservation.setReservationStatus(ReservationStatus.CHECKED_IN);
+        reservation.getReservationState().checkIn(reservation);
         reservationEventPublisher.publish(new ReservationEvent(reservation, ReservationEventType.CHECKED_IN));
         return reservation;
     }
@@ -64,10 +61,7 @@ public class CheckInServiceImpl implements CheckInService {
         }
 
         Reservation reservation = reservations.get(reservationId);
-        if (reservation.getReservationStatus() != ReservationStatus.CHECKED_IN) {
-            throw new HotelBookingException("Cannot check-out. Reservation status is: " + reservation.getReservationStatus());
-        }
-        reservation.setReservationStatus(ReservationStatus.CHECKED_OUT);
+        reservation.getReservationState().checkOut(reservation);
         reservation.getRooms().forEach(room ->  {
             Room room1 = rooms.get(room.getId());
             room1.setRoomStatus(RoomStatus.AVAILABLE);

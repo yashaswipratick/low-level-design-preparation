@@ -10,6 +10,7 @@ import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEve
 import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventPublisher;
 import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventType;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservationService;
+import com.lld.practice.tutor_sessions.hotel_reservation.state.impl.ReservedState;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
 import com.lld.practice.tutor_sessions.hotel_reservation.validator.HotelBookingServiceValidator;
 
@@ -108,7 +109,7 @@ public class HotelReservationServiceImpl implements HotelReservationService {
             // Step 6: All rooms still available — book them
             Reservation reservation = new Reservation(UUID.randomUUID().toString(),
                     guest, candidateRooms, checkIn, checkOut, null, null,
-                    LocalDate.now(), ReservationStatus.RESERVED);
+                    LocalDate.now(), ReservationStatus.RESERVED, new ReservedState());
             candidateRooms.forEach(room -> room.setRoomStatus(RoomStatus.BOOKED));
             reservations.put(reservation.getId(), reservation);
             reservationEventPublisher.publish(new ReservationEvent(reservation, ReservationEventType.RESERVED));
@@ -142,11 +143,15 @@ public class HotelReservationServiceImpl implements HotelReservationService {
             lock.unlock();
         }
 
-        // Step 3: Sort rooms by id — DEADLOCK PREVENTION
+        // Step 3: Guard check — delegate to State pattern BEFORE acquiring room locks
+        // Throws HotelBookingException immediately if CHECKED_OUT or already CANCELLED
+        reservation.getReservationState().cancel(reservation);
+
+        // Step 4: Sort rooms by id — DEADLOCK PREVENTION
         List<Room> roomsToFree = new ArrayList<>(reservation.getRooms());
         roomsToFree.sort(Comparator.comparing(Room::getId));
 
-        // Step 4: Acquire per-room locks in sorted order
+        // Step 5: Acquire per-room locks in sorted order
         List<ReentrantLock> acquiredLocks = new ArrayList<>();
         try {
             for (Room room : roomsToFree) {
@@ -155,20 +160,19 @@ public class HotelReservationServiceImpl implements HotelReservationService {
                 acquiredLocks.add(roomLock);
             }
 
-            // Step 5: Double-check reservation still exists under lock
+            // Step 6: Double-check reservation still exists under lock
             // Another thread may have already cancelled it
             if (!reservations.containsKey(reservationId)) {
                 throw new HotelBookingException("Reservation already cancelled by another operation");
             }
 
-            // Step 6: Free rooms and cancel
+            // Step 7: Free rooms (state already transitioned in Step 3)
             roomsToFree.forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
-            reservation.setReservationStatus(ReservationStatus.CANCELLED);
             reservations.remove(reservationId);
             reservationEventPublisher.publish(new ReservationEvent(reservation, ReservationEventType.CANCELLED));
             return reservation;
         } finally {
-            // Step 7: Always release all room locks
+            // Step 8: Always release all room locks
             acquiredLocks.forEach(ReentrantLock::unlock);
         }
     }
@@ -195,11 +199,15 @@ public class HotelReservationServiceImpl implements HotelReservationService {
             lock.unlock();
         }
 
-        // Step 3: Sort OLD rooms by id — DEADLOCK PREVENTION
+        // Step 3: Guard check — delegate to State pattern BEFORE acquiring room locks
+        // Throws HotelBookingException immediately if CHECKED_IN, CHECKED_OUT, or CANCELLED
+        oldReservation.getReservationState().modify(oldReservation, newCheckIn, newCheckOut);
+
+        // Step 4: Sort OLD rooms by id — DEADLOCK PREVENTION
         List<Room> oldRooms = new ArrayList<>(oldReservation.getRooms());
         oldRooms.sort(Comparator.comparing(Room::getId));
 
-        // Step 4: Acquire per-room locks for OLD rooms
+        // Step 5: Acquire per-room locks for OLD rooms
         List<ReentrantLock> acquiredLocks = new ArrayList<>();
         try {
             for (Room room : oldRooms) {
