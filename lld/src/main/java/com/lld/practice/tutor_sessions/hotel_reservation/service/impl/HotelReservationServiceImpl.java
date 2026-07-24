@@ -128,54 +128,111 @@ public class HotelReservationServiceImpl implements HotelReservationService {
 
     @Override
     public Reservation cancelReservation(String reservationId) {
+        // Step 1: Input validation — outside lock (fast fail)
+        if (reservationId == null) {
+            throw new IllegalArgumentException("reservationId is null");
+        }
+
+        // Step 2: Find reservation using global lock (safe map read)
+        Reservation reservation;
         lock.lock();
         try {
-            if (reservationId == null) {
-                throw new IllegalArgumentException("reservationId is null");
-            }
-
             if (reservations.isEmpty()) {
                 throw new HotelBookingException("No reservations found");
             }
-
             if (!reservations.containsKey(reservationId)) {
                 throw new HotelBookingException("reservationId not found");
             }
-            Reservation reservation = reservations.get(reservationId);
-            reservation.getRooms().forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
+            reservation = reservations.get(reservationId);
+        } finally {
+            lock.unlock();
+        }
+
+        // Step 3: Sort rooms by id — DEADLOCK PREVENTION
+        List<Room> roomsToFree = new ArrayList<>(reservation.getRooms());
+        roomsToFree.sort(Comparator.comparing(Room::getId));
+
+        // Step 4: Acquire per-room locks in sorted order
+        List<ReentrantLock> acquiredLocks = new ArrayList<>();
+        try {
+            for (Room room : roomsToFree) {
+                ReentrantLock roomLock = roomLocks.computeIfAbsent(room.getId(), id -> new ReentrantLock());
+                roomLock.lock();
+                acquiredLocks.add(roomLock);
+            }
+
+            // Step 5: Double-check reservation still exists under lock
+            // Another thread may have already cancelled it
+            if (!reservations.containsKey(reservationId)) {
+                throw new HotelBookingException("Reservation already cancelled by another operation");
+            }
+
+            // Step 6: Free rooms and cancel
+            roomsToFree.forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
             reservation.setReservationStatus(ReservationStatus.CANCELLED);
             reservations.remove(reservationId);
             notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Cancelled");
             return reservation;
         } finally {
-            lock.unlock();
+            // Step 7: Always release all room locks
+            acquiredLocks.forEach(ReentrantLock::unlock);
         }
     }
 
     @Override
     public Reservation modifyReservation(String reservationId, LocalDate newCheckIn, LocalDate newCheckOut) {
+        // Step 1: Input validation — outside lock (fast fail)
+        if (reservationId == null) {
+            throw new IllegalArgumentException("reservationId is null");
+        }
+
+        // Step 2: Find old reservation using global lock (safe map read)
+        Reservation oldReservation;
         lock.lock();
         try {
-            if (reservationId == null) {
-                throw new IllegalArgumentException("reservationId is null");
-            }
-
             if (reservations.isEmpty()) {
                 throw new IllegalArgumentException("No reservations found");
             }
-
             if (!reservations.containsKey(reservationId)) {
                 throw new IllegalArgumentException("reservationId not found");
             }
-            Reservation reservation = reservations.get(reservationId);
-            reservation.getRooms().forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
-            reservations.remove(reservationId);  // remove old before creating new
-            Reservation reserve = reserve(reservation.getGuests(), newCheckIn, newCheckOut);
-            notificationService.trackNotification(reserve, NotificationTypeStatus.EMAIL, "Reservation Modified");
-            return reserve;
+            oldReservation = reservations.get(reservationId);
         } finally {
             lock.unlock();
         }
+
+        // Step 3: Sort OLD rooms by id — DEADLOCK PREVENTION
+        List<Room> oldRooms = new ArrayList<>(oldReservation.getRooms());
+        oldRooms.sort(Comparator.comparing(Room::getId));
+
+        // Step 4: Acquire per-room locks for OLD rooms
+        List<ReentrantLock> acquiredLocks = new ArrayList<>();
+        try {
+            for (Room room : oldRooms) {
+                ReentrantLock roomLock = roomLocks.computeIfAbsent(room.getId(), id -> new ReentrantLock());
+                roomLock.lock();
+                acquiredLocks.add(roomLock);
+            }
+
+            // Step 5: Double-check reservation still exists under lock
+            if (!reservations.containsKey(reservationId)) {
+                throw new HotelBookingException("Reservation was modified or cancelled by another operation");
+            }
+
+            // Step 6: Free old rooms and remove old reservation
+            oldRooms.forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
+            reservations.remove(reservationId);
+
+        } finally {
+            // Step 7: Release OLD room locks BEFORE calling reserve()
+            // This avoids holding old locks while acquiring new locks (potential deadlock)
+            acquiredLocks.forEach(ReentrantLock::unlock);
+        }
+
+        // Step 8: Create new reservation for new dates (reserve() handles its own per-room locks)
+        Reservation newReservation = reserve(oldReservation.getGuests(), newCheckIn, newCheckOut);
+        notificationService.trackNotification(newReservation, NotificationTypeStatus.EMAIL, "Reservation Modified");
+        return newReservation;
     }
 
     @Override
