@@ -6,12 +6,12 @@ import com.lld.practice.tutor_sessions.hotel_reservation.exception.HotelBookingE
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Guest;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Room;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventPublisher;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.impl.EmailNotificationObserver;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.CheckInService;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservationService;
-import com.lld.practice.tutor_sessions.hotel_reservation.service.NotificationService;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.CheckInServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.HotelReservationServiceImpl;
-import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.NotificationServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
 
 import java.time.LocalDate;
@@ -381,13 +381,15 @@ public class HotelConcurrencyTestDriver {
     }
 
     static HotelReservationService buildBookingService(HotelDataStore store) {
-        NotificationService ns = new NotificationServiceImpl(store);
-        return new HotelReservationServiceImpl(store, ns);
+        ReservationEventPublisher publisher = new ReservationEventPublisher();
+        publisher.subscribe(new EmailNotificationObserver());
+        return new HotelReservationServiceImpl(store, publisher);
     }
 
     static CheckInService buildCheckInService(HotelDataStore store, HotelReservationService bookingService) {
-        NotificationService ns = new NotificationServiceImpl(store);
-        return new CheckInServiceImpl(store, ns);
+        ReservationEventPublisher publisher = new ReservationEventPublisher();
+        publisher.subscribe(new EmailNotificationObserver());
+        return new CheckInServiceImpl(store, publisher);
     }
 
     static void pass(String message) {

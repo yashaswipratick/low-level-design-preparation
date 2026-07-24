@@ -414,10 +414,64 @@ RoomSelectionStrategy (interface: List<Room> select(List<Room> available, List<G
 ### IMPLEMENTATION ORDER (follow this sequence)
 
 ```
-Step 1: Observer Pattern   → you implement → I review
+Step 1: Observer Pattern   → ✅ IMPLEMENTED
 Step 2: State Pattern      → you implement → I review  
 Step 3: Strategy Pattern   → you implement → I review
 ```
+
+---
+
+## ✅ PATTERN 1 IMPLEMENTED: Observer — Complete Implementation Log
+
+### Files Created:
+```
+observer/
+    ReservationEventType.java        → enum: RESERVED, CANCELLED, MODIFIED, CHECKED_IN, CHECKED_OUT
+    ReservationEvent.java            → immutable event object (Reservation + EventType + timestamp)
+    ReservationObserver.java         → interface: void onEvent(ReservationEvent event)
+    ReservationEventPublisher.java   → subscribe / unsubscribe / publish to all observers
+    impl/
+        EmailNotificationObserver.java → prints email message per event type (simulates sending)
+```
+
+### Wired Into:
+| Service | Events Published |
+|---------|-----------------|
+| `HotelReservationServiceImpl.reserve()` | `RESERVED` |
+| `HotelReservationServiceImpl.cancelReservation()` | `CANCELLED` |
+| `HotelReservationServiceImpl.modifyReservation()` | `MODIFIED` |
+| `CheckInServiceImpl.checkIn()` | `CHECKED_IN` |
+| `CheckInServiceImpl.checkOut()` | `CHECKED_OUT` |
+
+### Key Design Decisions:
+- `ReservationEvent` is **immutable** — `occurredAt` auto-captured in constructor, no setters
+- `ReservationEventPublisher` holds `List<ReservationObserver>` — no dependency on specific observer
+- Services receive `ReservationEventPublisher` via **constructor injection** — not created internally
+- `NotificationService` and `NotificationTypeStatus` fully **removed** from both service implementations
+
+### What Changed vs Before:
+```
+BEFORE (tightly coupled):
+  HotelReservationServiceImpl → directly calls NotificationService
+  CheckInServiceImpl → directly calls NotificationService
+  Adding SMS = modify 5 files ❌
+
+AFTER (Observer pattern):
+  HotelReservationServiceImpl → publishes ReservationEvent
+  CheckInServiceImpl → publishes ReservationEvent
+  Adding SMS = create SmsNotificationObserver + register it = 1 new file ✅
+```
+
+### Interview Narration (memorize this):
+> "Previously every service directly called NotificationService — adding SMS would require
+> changing 5 files. With Observer, I publish one event and any number of subscribers react
+> independently. Adding SMS = create SmsNotificationObserver, register it —
+> zero changes to existing services. This follows the Open/Closed Principle."
+
+### Business Rules Added During Implementation:
+- `checkIn()` — guards that reservation must be in `RESERVED` state before allowing check-in
+- `checkOut()` — guards that reservation must be in `CHECKED_IN` state before allowing check-out
+- Both throw `HotelBookingException` with current status in the message for debuggability
 
 ---
 

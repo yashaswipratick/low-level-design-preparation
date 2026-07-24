@@ -6,12 +6,12 @@ import com.lld.practice.tutor_sessions.hotel_reservation.exception.HotelBookingE
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Guest;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Room;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventPublisher;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.impl.EmailNotificationObserver;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.CheckInService;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservationService;
-import com.lld.practice.tutor_sessions.hotel_reservation.service.NotificationService;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.CheckInServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.HotelReservationServiceImpl;
-import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.NotificationServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
 
 import java.time.LocalDate;
@@ -27,9 +27,13 @@ public class HotelReservationDriver {
 
         // ── Setup ─────────────────────────────────────────────────────────
         HotelDataStore store = new HotelDataStore();
-        NotificationService notificationService = new NotificationServiceImpl(store);
-        HotelReservationService bookingService = new HotelReservationServiceImpl(store, notificationService);
-        CheckInService checkInService = new CheckInServiceImpl(store, notificationService);
+
+        // Observer pattern: create publisher, register observers
+        ReservationEventPublisher publisher = new ReservationEventPublisher();
+        publisher.subscribe(new EmailNotificationObserver());
+
+        HotelReservationService bookingService = new HotelReservationServiceImpl(store, publisher);
+        CheckInService checkInService = new CheckInServiceImpl(store, publisher);
 
         // Seed 3 rooms
         store.getRooms().put("R1", new Room("R1", "101", RoomType.DELUXE, 100.0, RoomStatus.AVAILABLE));

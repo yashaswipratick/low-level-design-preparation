@@ -1,26 +1,20 @@
 package com.lld.practice.tutor_sessions.hotel_reservation.service.impl;
 
-import com.lld.practice.tutor_sessions.hotel_reservation.enums.NotificationTypeStatus;
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.ReservationStatus;
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.RoomStatus;
 import com.lld.practice.tutor_sessions.hotel_reservation.exception.HotelBookingException;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Guest;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Room;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEvent;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventPublisher;
+import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventType;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservationService;
-import com.lld.practice.tutor_sessions.hotel_reservation.service.NotificationService;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
 import com.lld.practice.tutor_sessions.hotel_reservation.validator.HotelBookingServiceValidator;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -29,15 +23,15 @@ public class HotelReservationServiceImpl implements HotelReservationService {
     private final Map<String, Reservation> reservations;
     private final Map<String, Room> rooms;
     private final ConcurrentHashMap<String, ReentrantLock> roomLocks;
-    private final NotificationService notificationService;
+    private final ReservationEventPublisher reservationEventPublisher;
     private final ReentrantLock lock = new ReentrantLock(); // global lock for non-room operations
 
     // HotelDataStore is injected — same instance shared across all services
-    public HotelReservationServiceImpl(HotelDataStore dataStore, NotificationService notificationService) {
+    public HotelReservationServiceImpl(HotelDataStore dataStore, ReservationEventPublisher reservationEventPublisher) {
         this.reservations = dataStore.getReservations();
         this.rooms = dataStore.getRooms();
         this.roomLocks = dataStore.getRoomLocks();
-        this.notificationService = notificationService;
+        this.reservationEventPublisher = reservationEventPublisher;
     }
 
 
@@ -117,7 +111,7 @@ public class HotelReservationServiceImpl implements HotelReservationService {
                     LocalDate.now(), ReservationStatus.RESERVED);
             candidateRooms.forEach(room -> room.setRoomStatus(RoomStatus.BOOKED));
             reservations.put(reservation.getId(), reservation);
-            notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Successful");
+            reservationEventPublisher.publish(new ReservationEvent(reservation, ReservationEventType.RESERVED));
             return reservation;
 
         } finally {
@@ -171,7 +165,7 @@ public class HotelReservationServiceImpl implements HotelReservationService {
             roomsToFree.forEach(room -> room.setRoomStatus(RoomStatus.AVAILABLE));
             reservation.setReservationStatus(ReservationStatus.CANCELLED);
             reservations.remove(reservationId);
-            notificationService.trackNotification(reservation, NotificationTypeStatus.EMAIL, "Reservation Cancelled");
+            reservationEventPublisher.publish(new ReservationEvent(reservation, ReservationEventType.CANCELLED));
             return reservation;
         } finally {
             // Step 7: Always release all room locks
@@ -231,7 +225,7 @@ public class HotelReservationServiceImpl implements HotelReservationService {
 
         // Step 8: Create new reservation for new dates (reserve() handles its own per-room locks)
         Reservation newReservation = reserve(oldReservation.getGuests(), newCheckIn, newCheckOut);
-        notificationService.trackNotification(newReservation, NotificationTypeStatus.EMAIL, "Reservation Modified");
+        reservationEventPublisher.publish(new ReservationEvent(newReservation, ReservationEventType.MODIFIED));
         return newReservation;
     }
 
