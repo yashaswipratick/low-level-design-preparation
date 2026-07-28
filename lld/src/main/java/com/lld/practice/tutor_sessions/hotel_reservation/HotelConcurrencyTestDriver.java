@@ -13,6 +13,7 @@ import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservatio
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.CheckInServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.HotelReservationServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
+import com.lld.practice.tutor_sessions.hotel_reservation.strategy.impl.DefaultSelectionStrategy;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -383,7 +384,7 @@ public class HotelConcurrencyTestDriver {
     static HotelReservationService buildBookingService(HotelDataStore store) {
         ReservationEventPublisher publisher = new ReservationEventPublisher();
         publisher.subscribe(new EmailNotificationObserver());
-        return new HotelReservationServiceImpl(store, publisher);
+        return new HotelReservationServiceImpl(store, publisher, new DefaultSelectionStrategy());
     }
 
     static CheckInService buildCheckInService(HotelDataStore store, HotelReservationService bookingService) {

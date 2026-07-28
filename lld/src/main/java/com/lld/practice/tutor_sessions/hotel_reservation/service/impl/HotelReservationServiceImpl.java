@@ -12,6 +12,7 @@ import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEve
 import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservationService;
 import com.lld.practice.tutor_sessions.hotel_reservation.state.impl.ReservedState;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
+import com.lld.practice.tutor_sessions.hotel_reservation.strategy.RoomSelectionStrategy;
 import com.lld.practice.tutor_sessions.hotel_reservation.validator.HotelBookingServiceValidator;
 
 import java.time.LocalDate;
@@ -26,13 +27,15 @@ public class HotelReservationServiceImpl implements HotelReservationService {
     private final ConcurrentHashMap<String, ReentrantLock> roomLocks;
     private final ReservationEventPublisher reservationEventPublisher;
     private final ReentrantLock lock = new ReentrantLock(); // global lock for non-room operations
+    private final RoomSelectionStrategy roomSelectionStrategy;
 
     // HotelDataStore is injected — same instance shared across all services
-    public HotelReservationServiceImpl(HotelDataStore dataStore, ReservationEventPublisher reservationEventPublisher) {
+    public HotelReservationServiceImpl(HotelDataStore dataStore, ReservationEventPublisher reservationEventPublisher, RoomSelectionStrategy roomSelectionStrategy) {
         this.reservations = dataStore.getReservations();
         this.rooms = dataStore.getRooms();
         this.roomLocks = dataStore.getRoomLocks();
         this.reservationEventPublisher = reservationEventPublisher;
+        this.roomSelectionStrategy = roomSelectionStrategy;
     }
 
 
@@ -80,9 +83,8 @@ public class HotelReservationServiceImpl implements HotelReservationService {
             throw new HotelBookingException("No available rooms for the given dates");
         }
 
-        int numberOfRooms = (int) Math.ceil(guest.size() / 2.0);
         // Step 2: Pick candidate rooms
-        List<Room> candidateRooms = new ArrayList<>(availableRooms.subList(0, numberOfRooms));
+        List<Room> candidateRooms = roomSelectionStrategy.selectRooms(availableRooms, guest);
 
         // Step 3: Sort by roomId — DEADLOCK PREVENTION
         // Always acquire locks in same order across all threads

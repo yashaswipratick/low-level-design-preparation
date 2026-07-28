@@ -37,7 +37,7 @@ public class CheckInServiceImpl implements CheckInService {
         }
 
         if (!reservations.containsKey(reservationId)) {
-            throw new IllegalArgumentException("reservationId not found");
+            throw new HotelBookingException("reservationId not found");
         }
 
         Reservation reservation = reservations.get(reservationId);
@@ -57,14 +57,14 @@ public class CheckInServiceImpl implements CheckInService {
         }
 
         if (!reservations.containsKey(reservationId)) {
-            throw new IllegalArgumentException("reservationId not found");
+            throw new HotelBookingException("reservationId not found");
         }
 
         Reservation reservation = reservations.get(reservationId);
         reservation.getReservationState().checkOut(reservation);
-        reservation.getRooms().forEach(room ->  {
-            Room room1 = rooms.get(room.getId());
-            room1.setRoomStatus(RoomStatus.AVAILABLE);
+        reservation.getRooms()
+                .forEach(room ->  {
+            rooms.get(room.getId()).setRoomStatus(RoomStatus.AVAILABLE);
         });
         reservationEventPublisher.publish(new ReservationEvent(reservation, ReservationEventType.CHECKED_OUT));
         return reservation;

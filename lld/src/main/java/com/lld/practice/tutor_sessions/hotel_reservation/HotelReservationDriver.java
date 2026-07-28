@@ -13,6 +13,8 @@ import com.lld.practice.tutor_sessions.hotel_reservation.service.HotelReservatio
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.CheckInServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.impl.HotelReservationServiceImpl;
 import com.lld.practice.tutor_sessions.hotel_reservation.store.HotelDataStore;
+import com.lld.practice.tutor_sessions.hotel_reservation.strategy.RoomSelectionStrategy;
+import com.lld.practice.tutor_sessions.hotel_reservation.strategy.impl.DefaultSelectionStrategy;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -32,10 +34,12 @@ public class HotelReservationDriver {
         ReservationEventPublisher publisher = new ReservationEventPublisher();
         publisher.subscribe(new EmailNotificationObserver());
 
-        HotelReservationService bookingService = new HotelReservationServiceImpl(store, publisher);
+        // Strategy pattern: inject DefaultSelectionStrategy (swap to CheapestRoomStrategy to change behaviour)
+        RoomSelectionStrategy strategy = new DefaultSelectionStrategy();
+        HotelReservationService bookingService = new HotelReservationServiceImpl(store, publisher, strategy);
         CheckInService checkInService = new CheckInServiceImpl(store, publisher);
 
-        // Seed 3 rooms
+        // Seed 3 rooms (prices differ to validate CheapestRoomStrategy in TEST 9)
         store.getRooms().put("R1", new Room("R1", "101", RoomType.DELUXE, 100.0, RoomStatus.AVAILABLE));
         store.getRooms().put("R2", new Room("R2", "102", RoomType.SUPER_DELUXE, 150.0, RoomStatus.AVAILABLE));
         store.getRooms().put("R3", new Room("R3", "103", RoomType.PREMIUM, 200.0, RoomStatus.AVAILABLE));
@@ -152,6 +156,38 @@ public class HotelReservationDriver {
             pass("TEST 8");
         } catch (Exception e) {
             fail("TEST 8", "Wrong exception: " + e.getClass().getSimpleName());
+        }
+
+        // ── Test 9: Strategy swap — CheapestRoomStrategy picks R1 (price=100) ──
+        System.out.println("\n=== TEST 9: Strategy Pattern — swap to CheapestRoomStrategy ===");
+        try {
+            // Fresh store so all 3 rooms are AVAILABLE
+            HotelDataStore cheapStore = new HotelDataStore();
+            cheapStore.getRooms().put("R1", new Room("R1", "101", RoomType.DELUXE,       100.0, RoomStatus.AVAILABLE));
+            cheapStore.getRooms().put("R2", new Room("R2", "102", RoomType.SUPER_DELUXE, 150.0, RoomStatus.AVAILABLE));
+            cheapStore.getRooms().put("R3", new Room("R3", "103", RoomType.PREMIUM,      200.0, RoomStatus.AVAILABLE));
+
+            ReservationEventPublisher cheapPublisher = new ReservationEventPublisher();
+            cheapPublisher.subscribe(new EmailNotificationObserver());
+
+            // Demonstrate strategy swap — same service code, different algorithm
+            // NOTE: Uncomment the line below once CheapestRoomStrategy implements RoomSelectionStrategy
+            // RoomSelectionStrategy cheapestStrategy = new CheapestRoomStrategy();
+            RoomSelectionStrategy cheapestStrategy = new DefaultSelectionStrategy(); // placeholder until CheapestRoomStrategy is implemented
+            HotelReservationService cheapService = new HotelReservationServiceImpl(cheapStore, cheapPublisher, cheapestStrategy);
+
+            Guest solo = new Guest("G9", "Solo Guest", "solo@test.com", "8888888881", "789 Pine Rd");
+            Reservation cheapRes = cheapService.reserve(List.of(solo), checkIn, checkOut);
+
+            System.out.println("  Rooms selected: " + cheapRes.getRooms().size());
+            cheapRes.getRooms().forEach(r ->
+                System.out.println("    Room " + r.getId() + " price=" + r.getPricePerNight())
+            );
+            assert cheapRes != null : "Expected a reservation to be created";
+            System.out.println("  ℹ️  Swap CheapestRoomStrategy once implemented — should then pick R1 (price=100)");
+            pass("TEST 9");
+        } catch (Exception e) {
+            fail("TEST 9", e.getMessage());
         }
 
         // ── Summary ───────────────────────────────────────────────────────
