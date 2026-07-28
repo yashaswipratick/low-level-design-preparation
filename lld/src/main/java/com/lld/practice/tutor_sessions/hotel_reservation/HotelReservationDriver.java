@@ -3,6 +3,7 @@ package com.lld.practice.tutor_sessions.hotel_reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.RoomStatus;
 import com.lld.practice.tutor_sessions.hotel_reservation.enums.RoomType;
 import com.lld.practice.tutor_sessions.hotel_reservation.exception.HotelBookingException;
+import com.lld.practice.tutor_sessions.hotel_reservation.factory.RoomFactoryProvider;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Guest;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Room;
@@ -39,10 +40,11 @@ public class HotelReservationDriver {
         HotelReservationService bookingService = new HotelReservationServiceImpl(store, publisher, strategy);
         CheckInService checkInService = new CheckInServiceImpl(store, publisher);
 
-        // Seed 3 rooms (prices differ to validate CheapestRoomStrategy in TEST 9)
-        store.getRooms().put("R1", new Room("R1", "101", RoomType.DELUXE, 100.0, RoomStatus.AVAILABLE));
-        store.getRooms().put("R2", new Room("R2", "102", RoomType.SUPER_DELUXE, 150.0, RoomStatus.AVAILABLE));
-        store.getRooms().put("R3", new Room("R3", "103", RoomType.PREMIUM, 200.0, RoomStatus.AVAILABLE));
+        // Seed 3 rooms using Factory pattern — no more new Room(...) with hardcoded params
+        // Each factory knows its own RoomType and default price
+        store.getRooms().put("R1", RoomFactoryProvider.getRoomFactory(RoomType.DELUXE).createRoom("R1", "101"));
+        store.getRooms().put("R2", RoomFactoryProvider.getRoomFactory(RoomType.SUPER_DELUXE).createRoom("R2", "102"));
+        store.getRooms().put("R3", RoomFactoryProvider.getRoomFactory(RoomType.PREMIUM).createRoom("R3", "103"));
 
         // Create guests
         Guest g1 = new Guest("G1", "John Doe", "john@test.com", "9999999991", "123 Main St");
@@ -161,11 +163,11 @@ public class HotelReservationDriver {
         // ── Test 9: Strategy swap — CheapestRoomStrategy picks R1 (price=100) ──
         System.out.println("\n=== TEST 9: Strategy Pattern — swap to CheapestRoomStrategy ===");
         try {
-            // Fresh store so all 3 rooms are AVAILABLE
+            // Fresh store so all 3 rooms are AVAILABLE — using Factory pattern
             HotelDataStore cheapStore = new HotelDataStore();
-            cheapStore.getRooms().put("R1", new Room("R1", "101", RoomType.DELUXE,       100.0, RoomStatus.AVAILABLE));
-            cheapStore.getRooms().put("R2", new Room("R2", "102", RoomType.SUPER_DELUXE, 150.0, RoomStatus.AVAILABLE));
-            cheapStore.getRooms().put("R3", new Room("R3", "103", RoomType.PREMIUM,      200.0, RoomStatus.AVAILABLE));
+            cheapStore.getRooms().put("R1", RoomFactoryProvider.getRoomFactory(RoomType.DELUXE).createRoom("R1", "101"));
+            cheapStore.getRooms().put("R2", RoomFactoryProvider.getRoomFactory(RoomType.SUPER_DELUXE).createRoom("R2", "102"));
+            cheapStore.getRooms().put("R3", RoomFactoryProvider.getRoomFactory(RoomType.PREMIUM).createRoom("R3", "103"));
 
             ReservationEventPublisher cheapPublisher = new ReservationEventPublisher();
             cheapPublisher.subscribe(new EmailNotificationObserver());

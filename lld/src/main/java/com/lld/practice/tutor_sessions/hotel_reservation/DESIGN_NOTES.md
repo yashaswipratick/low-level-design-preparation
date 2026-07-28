@@ -489,3 +489,138 @@ Before starting to code a pattern, always state:
 
 **Never jump to code without stating the problem first. Interviewers want to see your reasoning.
 
+---
+
+## ✅ PATTERN 2 IMPLEMENTED: State — Complete Implementation Log
+
+### Files Created:
+```
+state/
+    ReservationState.java            → interface: checkIn(), checkOut(), cancel(), modify(newCheckIn, newCheckOut)
+    impl/
+        ReservedState.java           → allows checkIn(), cancel(), modify() | blocks checkOut()
+        CheckedInState.java          → allows checkOut() only               | blocks everything else
+        CheckedOutState.java         → terminal — blocks ALL operations
+        CancelledState.java          → terminal — blocks ALL operations
+```
+
+### Wired Into:
+| Class | How State Is Used |
+|-------|------------------|
+| `Reservation.java` | Holds `ReservationState currentState` field; constructed with `new ReservedState()` |
+| `HotelReservationServiceImpl.cancelReservation()` | Calls `reservation.getReservationState().cancel(reservation)` as guard BEFORE room lock acquisition |
+| `HotelReservationServiceImpl.modifyReservation()` | Calls `oldReservation.getReservationState().modify(reservation, newCheckIn, newCheckOut)` as guard BEFORE room lock acquisition |
+| `CheckInServiceImpl.checkIn()` | Calls `reservation.getReservationState().checkIn(reservation)` — delegates transition entirely to state |
+| `CheckInServiceImpl.checkOut()` | Calls `reservation.getReservationState().checkOut(reservation)` — delegates transition entirely to state |
+
+### State Transition Table:
+| Current State | checkIn() | checkOut() | cancel() | modify() |
+|--------------|-----------|------------|----------|----------|
+| **RESERVED** | ✅ → CHECKED_IN | ❌ throws | ✅ → CANCELLED | ✅ (dates updated) |
+| **CHECKED_IN** | ❌ throws | ✅ → CHECKED_OUT | ❌ throws | ❌ throws |
+| **CHECKED_OUT** | ❌ throws | ❌ throws | ❌ throws | ❌ throws |
+| **CANCELLED** | ❌ throws | ❌ throws | ❌ throws | ❌ throws |
+
+### Key Design Decisions:
+- Each state class is **responsible for transitioning itself**: `reservation.setReservationStatus(...)` + `reservation.setReservationState(new NextState())` both called inside the state
+- Terminal states (`CheckedOutState`, `CancelledState`) throw `HotelBookingException` for ALL operations — no "if" checks scattered across service layer
+- `Reservation` constructor takes `ReservationState` — always initialized with `new ReservedState()`
+- Guard calls happen **BEFORE** acquiring room locks — fast-fail, no wasted lock acquisition on invalid transitions
+
+### What Changed vs Before:
+```
+BEFORE (scattered if-checks in service layer):
+  CheckInServiceImpl.checkIn() → if (status != RESERVED) throw HotelBookingException
+  CheckInServiceImpl.checkOut() → if (status != CHECKED_IN) throw HotelBookingException
+  cancelReservation() → no guard, CHECKED_OUT reservation could be cancelled!
+
+AFTER (State pattern):
+  CheckInServiceImpl.checkIn() → reservation.getReservationState().checkIn(reservation)
+  CheckInServiceImpl.checkOut() → reservation.getReservationState().checkOut(reservation)
+  cancelReservation() → reservation.getReservationState().cancel(reservation)
+  Adding new state = add one class, zero changes to service layer ✅
+```
+
+### Interview Narration (memorize this):
+> "Previously transition guards were scattered as if-checks across every service method.
+> If I add a NO_SHOW state, I'd have to find and update every relevant check.
+> State pattern encapsulates all rules per state in one class.
+> ReservedState knows what it allows; CheckedOutState throws for everything — no hunting for guards.
+> This follows Single Responsibility: each state class owns its own invariants."
+
+---
+
+## ✅ PATTERN 3 IMPLEMENTED: Strategy — Complete Implementation Log
+
+### Files Created:
+```
+strategy/
+    RoomSelectionStrategy.java       → interface: List<Room> selectRooms(List<Room> available, List<Guest> guests)
+    impl/
+        DefaultSelectionStrategy.java  → ceil(guests/2) rooms, first N from available list
+        CheapestRoomStrategy.java      → sort available rooms by pricePerNight ASC, pick cheapest N
+```
+
+### Wired Into:
+| Class | How Strategy Is Used |
+|-------|---------------------|
+| `HotelReservationServiceImpl` | Constructor receives `RoomSelectionStrategy roomSelectionStrategy` (injected) |
+| `HotelReservationServiceImpl.reserve()` | Calls `roomSelectionStrategy.selectRooms(availableRooms, guests)` in Step 2 — replaces hardcoded logic |
+| `HotelConcurrencyTestDriver.buildBookingService()` | Injects `new DefaultSelectionStrategy()` when constructing service |
+
+### Strategy Comparison:
+| Strategy | Algorithm | When to Use |
+|----------|-----------|-------------|
+| `DefaultSelectionStrategy` | `ceil(guests/2)` rooms, first available | Default — no preference from guest |
+| `CheapestRoomStrategy` | Sort by `pricePerNight` ASC, pick N cheapest | Budget-conscious guests |
+| `RoomTypePreferenceStrategy` *(v3)* | Filter by requested `RoomType`, then pick N | Guest specifies room type preference |
+
+### Key Design Decisions:
+- `selectRooms()` returns a **mutable `ArrayList`** (not `subList` or `List.of`) — required because `reserve()` sorts the result for deadlock prevention
+- Strategy is injected at **construction time** — swappable without touching any service logic
+- `HotelReservationServiceImpl` has zero knowledge of which strategy is active — pure polymorphism
+- Strategy throws `HotelBookingException` if `availableRooms` is empty or fewer rooms available than needed
+
+### What Changed vs Before:
+```
+BEFORE (hardcoded in reserve()):
+  int numberOfRooms = (int) Math.ceil(guest.size() / 2.0);
+  List<Room> candidateRooms = new ArrayList<>(availableRooms.subList(0, numberOfRooms));
+  // Can't change algorithm without editing service class
+
+AFTER (Strategy pattern):
+  List<Room> candidateRooms = roomSelectionStrategy.selectRooms(availableRooms, guest);
+  // Swap to CheapestRoomStrategy at construction → zero changes to service class ✅
+```
+
+### Swapping Strategy at Runtime (Driver example):
+```java
+// Use default (first available):
+HotelReservationService service = new HotelReservationServiceImpl(store, publisher, new DefaultSelectionStrategy());
+
+// OR use cheapest — zero changes to HotelReservationServiceImpl:
+HotelReservationService service = new HotelReservationServiceImpl(store, publisher, new CheapestRoomStrategy());
+```
+
+### Interview Narration (memorize this):
+> "Previously room selection was hardcoded — always picks first N available rooms.
+> If a guest wants the cheapest room or a specific type, I'd have to add if-branches inside reserve().
+> Strategy pattern extracts the algorithm into its own class.
+> I inject the strategy — service has no idea which algorithm runs.
+> Adding 'prefer premium rooms' = one new class, zero service changes.
+> Trade-off: adds abstraction, justified because room selection policy varies by business need."
+
+---
+
+## 📋 DESIGN PATTERNS — FINAL IMPLEMENTATION SUMMARY
+
+| Pattern | Status | Files | Problem Solved |
+|---------|--------|-------|---------------|
+| **Observer** | ✅ Done | `observer/` (5 files) | Decoupled notification — add channels without touching services |
+| **State** | ✅ Done | `state/` (5 files) | Enforced reservation lifecycle — invalid transitions throw immediately |
+| **Strategy** | ✅ Done | `strategy/` (3 files) | Pluggable room selection — swap algorithm at construction, zero service changes |
+| **Factory** | 🔲 v3 | — | Room type creation decoupled from service |
+| **Decorator** | 🔲 v3 | — | Add retry/logging to notification without modifying observer classes |
+| **Chain of Responsibility** | 🔲 v3 | — | Validation pipeline: null → dates → availability → capacity |
+
+
