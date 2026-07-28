@@ -273,7 +273,7 @@ CORRECT — release old locks first, then acquire new locks:
 | State-based behaviour? | Reservation: RESERVED→CHECKED_IN→CHECKED_OUT / CANCELLED | ✅ **State** |
 | One-to-many notification? | Booking confirmed → Email, SMS, Push all need to be notified | ✅ **Observer** |
 | Creating related objects? | Room types: DELUXE, SUPER_DELUXE, PREMIUM | ✅ **Factory** (v3) |
-| Add features without change? | Add retry / logging to NotificationService | ✅ **Decorator** (v3) |
+| Add features without change? | Add retry / logging to NotificationService | ✅ **Decorator** |
 | Chain of checks? | reserve() validates: null → dates → availability → capacity | ✅ **Chain of Responsibility** (v3) |
 | Single shared instance? | HotelDataStore shared across all services | ✅ **Singleton** (already partial) |
 
@@ -288,8 +288,6 @@ CORRECT — release old locks first, then acquire new locks:
 | 3 | **Strategy** | Room selection is hardcoded (`ceil(guests/2)` picks first N). Strategy makes it pluggable |
 
 **Defer to v3 (mention, don't implement):**
-- Factory: room type creation
-- Decorator: notification retry/logging
 - Chain of Responsibility: validation chain
 
 ---
@@ -415,8 +413,10 @@ RoomSelectionStrategy (interface: List<Room> select(List<Room> available, List<G
 
 ```
 Step 1: Observer Pattern   → ✅ IMPLEMENTED
-Step 2: State Pattern      → you implement → I review  
-Step 3: Strategy Pattern   → you implement → I review
+Step 2: State Pattern      → ✅ IMPLEMENTED
+Step 3: Strategy Pattern   → ✅ IMPLEMENTED
+Step 4: Factory Pattern    → ✅ IMPLEMENTED
+Step 5: Decorator Pattern  → ✅ IMPLEMENTED
 ```
 
 ---
@@ -702,6 +702,120 @@ AFTER (Factory pattern):
 
 ---
 
+## ✅ PATTERN 5 IMPLEMENTED: Decorator — Complete Implementation Log
+
+### Files Created:
+```
+decorator/
+    RetryObserverDecorator.java      → wraps any ReservationObserver; retries up to maxRetries times on failure; throws HotelBookingException after exhausting retries
+    LoggingObserverDecorator.java    → wraps any ReservationObserver; prints before/after log lines; rethrows on failure
+```
+
+### Problem Solved:
+```java
+// BEFORE (no resilience — one transient failure kills the notification):
+publisher.subscribe(new EmailNotificationObserver());
+// If EmailNotificationObserver.onEvent() throws on a flaky network call → exception propagates immediately
+
+// AFTER (Decorator adds retry without touching EmailNotificationObserver):
+publisher.subscribe(new RetryObserverDecorator(new EmailNotificationObserver(), 3));
+// Flaky call? Decorator retries up to 3 times transparently → EmailNotificationObserver unchanged ✅
+```
+
+### Decorator Structure:
+```
+ReservationObserver (interface: void onEvent(ReservationEvent))
+        │
+        ├── EmailNotificationObserver       ← the real worker (Concrete Component)
+        │
+        ├── RetryObserverDecorator          ← wraps any ReservationObserver (Decorator)
+        │       - holds: ReservationObserver wrapped + int maxRetries
+        │       - on failure: retries up to maxRetries, then throws HotelBookingException
+        │
+        └── LoggingObserverDecorator        ← wraps any ReservationObserver (Decorator)
+                - holds: ReservationObserver wrapped
+                - prints: "Sending Notification: <type> for Reservation ID: <id>"
+                - prints: "Notification Sent successfully" on success
+                - rethrows RuntimeException on failure
+```
+
+### Composability — Stack Decorators (key interview point):
+```java
+// Retry only:
+publisher.subscribe(new RetryObserverDecorator(new EmailNotificationObserver(), 3));
+
+// Logging only:
+publisher.subscribe(new LoggingObserverDecorator(new EmailNotificationObserver()));
+
+// Logging + Retry (stacked — logging wraps retrying observer):
+publisher.subscribe(
+    new LoggingObserverDecorator(
+        new RetryObserverDecorator(new EmailNotificationObserver(), 3)
+    )
+);
+// Order: log → retry(up to 3) → email → log result
+// EmailNotificationObserver is NEVER modified — zero changes to existing code ✅
+```
+
+### Wired Into:
+| Class | How Decorator Is Used |
+|-------|----------------------|
+| `HotelReservationDriver` (Test 1–8 setup) | `publisher.subscribe(new RetryObserverDecorator(new EmailNotificationObserver(), 3))` |
+| `HotelReservationDriver` (Test 10) | Dedicated `retryPublisher` with `RetryObserverDecorator` to demonstrate pattern explicitly |
+
+### Key Design Decisions:
+- Both decorators **implement `ReservationObserver`** — they ARE observers from the publisher's perspective; substitutability (Liskov) maintained
+- Both decorators **hold a `ReservationObserver` field** — they delegate to whatever is wrapped (could be another decorator)
+- `RetryObserverDecorator` throws `HotelBookingException` (domain exception) after exhausting retries — not a generic `RuntimeException`
+- `LoggingObserverDecorator` rethrows the original exception after logging — doesn't swallow failures silently
+- Zero changes to `EmailNotificationObserver`, `ReservationEventPublisher`, or any service class — **Open/Closed Principle** ✅
+
+### RetryObserverDecorator — Retry Flow:
+```
+attempt=0 → call wrapped.onEvent()
+  ├── success → return immediately ✅
+  └── throws  → attempt++ → attempt < maxRetries → print "Retry attempt N" → loop
+      └── attempt >= maxRetries → throw HotelBookingException("Notification Failed after N retries")
+```
+
+### What Changed vs Before:
+```
+BEFORE:
+  publisher.subscribe(new EmailNotificationObserver())
+  Any transient exception from email → propagates immediately to caller
+  To add retry: modify EmailNotificationObserver directly ← violates Open/Closed ❌
+
+AFTER (Decorator pattern):
+  publisher.subscribe(new RetryObserverDecorator(new EmailNotificationObserver(), 3))
+  Transient exceptions retried transparently
+  To add logging: wrap again → LoggingObserverDecorator(RetryObserverDecorator(...)) ✅
+  Zero changes to existing observer classes ✅
+```
+
+### Interview Narration (memorize this):
+> "Currently if EmailNotificationObserver fails, the exception propagates straight to the caller.
+> To add retry, I'd have to modify the observer class directly — violates Open/Closed.
+> Decorator pattern wraps any observer in a RetryObserverDecorator that catches exceptions and retries up to N times.
+> EmailNotificationObserver has zero idea it's being retried — it stays clean.
+> I can stack decorators: logging around retry around email — just constructor nesting, no inheritance.
+> Trade-off: stacked decorators can be hard to debug — stack trace goes through each layer.
+> Justified here because retry and logging are cross-cutting concerns that shouldn't pollute business observers."
+
+### Decorator vs Inheritance (why Decorator wins here):
+```
+INHERITANCE approach (bad):
+  RetryEmailObserver extends EmailNotificationObserver  ← tightly coupled to email
+  LoggingEmailObserver extends EmailNotificationObserver  ← also coupled to email
+  LoggingRetryEmailObserver extends ??? ← class explosion, can't compose freely
+
+DECORATOR approach (good):
+  RetryObserverDecorator wraps ANY ReservationObserver  ← works with email, SMS, push
+  LoggingObserverDecorator wraps ANY ReservationObserver  ← same
+  Stack them freely via constructor nesting ← no class explosion ✅
+```
+
+---
+
 ## 📋 DESIGN PATTERNS — FINAL IMPLEMENTATION SUMMARY
 
 | Pattern | Status | Files | Problem Solved |
@@ -710,7 +824,7 @@ AFTER (Factory pattern):
 | **State** | ✅ Done | `state/` (5 files) | Enforced reservation lifecycle — invalid transitions throw immediately |
 | **Strategy** | ✅ Done | `strategy/` (3 files) | Pluggable room selection — swap algorithm at construction, zero service changes |
 | **Factory** | ✅ Done | `factory/` (5 files) | Room creation decoupled — type defaults (price, status) owned by factory, not callers |
-| **Decorator** | 🔲 v3 | — | Add retry/logging to notification without modifying observer classes |
+| **Decorator** | ✅ Done | `decorator/` (2 files) | Retry + logging added to observers without modifying existing classes — Open/Closed ✅ |
 | **Chain of Responsibility** | 🔲 v3 | — | Validation pipeline: null → dates → availability → capacity |
 
 

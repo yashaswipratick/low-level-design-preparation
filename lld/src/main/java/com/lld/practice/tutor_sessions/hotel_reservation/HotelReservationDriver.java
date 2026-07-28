@@ -7,6 +7,7 @@ import com.lld.practice.tutor_sessions.hotel_reservation.factory.RoomFactoryProv
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Guest;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Reservation;
 import com.lld.practice.tutor_sessions.hotel_reservation.model.Room;
+import com.lld.practice.tutor_sessions.hotel_reservation.decorator.RetryObserverDecorator;
 import com.lld.practice.tutor_sessions.hotel_reservation.observer.ReservationEventPublisher;
 import com.lld.practice.tutor_sessions.hotel_reservation.observer.impl.EmailNotificationObserver;
 import com.lld.practice.tutor_sessions.hotel_reservation.service.CheckInService;
@@ -32,8 +33,9 @@ public class HotelReservationDriver {
         HotelDataStore store = new HotelDataStore();
 
         // Observer pattern: create publisher, register observers
+        // Decorator pattern: wrap EmailNotificationObserver with RetryObserverDecorator (max 3 retries)
         ReservationEventPublisher publisher = new ReservationEventPublisher();
-        publisher.subscribe(new EmailNotificationObserver());
+        publisher.subscribe(new RetryObserverDecorator(new EmailNotificationObserver(), 3));
 
         // Strategy pattern: inject DefaultSelectionStrategy (swap to CheapestRoomStrategy to change behaviour)
         RoomSelectionStrategy strategy = new DefaultSelectionStrategy();
@@ -190,6 +192,31 @@ public class HotelReservationDriver {
             pass("TEST 9");
         } catch (Exception e) {
             fail("TEST 9", e.getMessage());
+        }
+
+        // ── Test 10: Decorator Pattern — RetryObserverDecorator wraps EmailNotificationObserver ──
+        System.out.println("\n=== TEST 10: Decorator Pattern — RetryObserverDecorator with max 3 retries ===");
+        try {
+            // Demonstrates Decorator: wrap any ReservationObserver with retry behaviour
+            // EmailNotificationObserver is the real worker; RetryObserverDecorator adds retry around it
+            // Zero changes to EmailNotificationObserver — Open/Closed Principle ✅
+            ReservationEventPublisher retryPublisher = new ReservationEventPublisher();
+            retryPublisher.subscribe(new RetryObserverDecorator(new EmailNotificationObserver(), 3));
+
+            HotelDataStore retryStore = new HotelDataStore();
+            retryStore.getRooms().put("R1", RoomFactoryProvider.getRoomFactory(RoomType.DELUXE).createRoom("R1", "101"));
+
+            HotelReservationService retryService = new HotelReservationServiceImpl(retryStore, retryPublisher, new DefaultSelectionStrategy());
+
+            Guest g = new Guest("G10", "Retry Guest", "retry@test.com", "7777777771", "99 Retry Lane");
+            Reservation res = retryService.reserve(List.of(g), checkIn, checkOut);
+            System.out.println("  Reservation created with RetryDecorator active: " + res.getId());
+            System.out.println("  Email notification sent via RetryObserverDecorator (max 3 retries on failure)");
+            System.out.println("  ℹ️  If EmailNotificationObserver throws, decorator retries up to 3 times then throws HotelBookingException");
+            assert res != null : "Expected reservation to be created";
+            pass("TEST 10");
+        } catch (Exception e) {
+            fail("TEST 10", e.getMessage());
         }
 
         // ── Summary ───────────────────────────────────────────────────────
