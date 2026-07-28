@@ -612,6 +612,96 @@ HotelReservationService service = new HotelReservationServiceImpl(store, publish
 
 ---
 
+---
+
+## ✅ PATTERN 4 IMPLEMENTED: Factory — Complete Implementation Log
+
+### Files Created:
+```
+factory/
+    RoomFactory.java                   → interface: Room createRoom(String roomId, String roomNumber)
+    RoomFactoryProvider.java           → static provider: getRoomFactory(RoomType) → RoomFactory
+    impl/
+        DeluxeRoomFactory.java         → creates Room(DELUXE, price=100.0, AVAILABLE)
+        SuperDeluxeRoomFactory.java    → creates Room(SUPER_DELUXE, price=150.0, AVAILABLE)
+        PremiumDeluxeRoomFactory.java  → creates Room(PREMIUM, price=200.0, AVAILABLE)
+```
+
+### Problem Solved:
+```java
+// BEFORE (hardcoded room creation scattered everywhere):
+store.getRooms().put("R1", new Room("R1", "101", RoomType.DELUXE,       100.0, RoomStatus.AVAILABLE));
+store.getRooms().put("R2", new Room("R2", "102", RoomType.SUPER_DELUXE, 150.0, RoomStatus.AVAILABLE));
+store.getRooms().put("R3", new Room("R3", "103", RoomType.PREMIUM,      200.0, RoomStatus.AVAILABLE));
+// Caller must know: type, price, default status — tight coupling
+
+// AFTER (factory decouples creation):
+Room r1 = RoomFactoryProvider.getRoomFactory(RoomType.DELUXE).createRoom("R1", "101");
+Room r2 = RoomFactoryProvider.getRoomFactory(RoomType.SUPER_DELUXE).createRoom("R2", "102");
+Room r3 = RoomFactoryProvider.getRoomFactory(RoomType.PREMIUM).createRoom("R3", "103");
+// Caller only needs: roomId, roomNumber, and type — factory owns price and default status
+```
+
+### Wired Into:
+| Class | How Factory Is Used |
+|-------|---------------------|
+| `HotelReservationDriver.java` | Room seeding uses `RoomFactoryProvider.getRoomFactory(RoomType)` instead of `new Room(...)` directly |
+| `HotelConcurrencyTestDriver.buildStore()` | Room seeding uses factory for consistent room creation |
+
+### Factory Structure:
+```
+RoomType (enum)         RoomFactory (interface)
+     │                       │
+     DELUXE   ─────────► DeluxeRoomFactory.createRoom()      → price=100, AVAILABLE
+     SUPER_DELUXE ──────► SuperDeluxeRoomFactory.createRoom() → price=150, AVAILABLE
+     PREMIUM  ─────────► PremiumDeluxeRoomFactory.createRoom() → price=200, AVAILABLE
+     
+     RoomFactoryProvider.getRoomFactory(RoomType) → switch → returns correct factory
+```
+
+### Key Design Decisions:
+- `RoomFactory` interface has single method `createRoom(roomId, roomNumber)` — caller provides identity, factory provides type defaults
+- `RoomFactoryProvider` is a **static factory method** — no instantiation needed, clean usage
+- Default `RoomStatus` is always `AVAILABLE` — factory enforces this invariant, callers cannot accidentally set wrong status
+- Adding a new room type (e.g., `SUITE`) = add one factory class + one case in provider — zero changes to callers
+
+### ⚠️ Bug Found in RoomFactoryProvider (Review Item):
+```java
+// CURRENT (BUG — always returns SUPER_DELUXE factory regardless of input):
+switch (RoomType.valueOf(RoomType.SUPER_DELUXE.name())) {  // ← hardcoded constant!
+
+// CORRECT (should use the parameter):
+public static RoomFactory getRoomFactory(RoomType roomType) {
+    switch (roomType) {  // ← use the parameter
+        case DELUXE:       return new DeluxeRoomFactory();
+        case SUPER_DELUXE: return new SuperDeluxeRoomFactory();
+        case PREMIUM:      return new PremiumDeluxeRoomFactory();
+        default: throw new IllegalArgumentException("Unknown room type: " + roomType);
+    }
+}
+```
+**Fix needed:** Pass `roomType` parameter to the switch instead of `RoomType.valueOf(RoomType.SUPER_DELUXE.name())`.
+
+### What Changed vs Before:
+```
+BEFORE:
+  Driver seeds rooms with 5-param constructor — must know type, price, status
+  Adding new room tier = update every place that creates Room objects
+
+AFTER (Factory pattern):
+  Driver seeds rooms via RoomFactoryProvider.getRoomFactory(RoomType).createRoom(id, number)
+  Adding new room tier (SUITE) = DeluxeSuiteFactory + 1 case in provider = zero driver changes ✅
+```
+
+### Interview Narration (memorize this):
+> "Currently room creation is scattered — callers must know price and status per type.
+> If we add a SUITE tier at price 300, I'd have to find every new Room() call and update it.
+> Factory pattern centralizes creation logic.
+> RoomFactoryProvider.getRoomFactory(SUITE) returns SuiteRoomFactory — caller stays untouched.
+> Trade-off: slight indirection, justified because room type attributes (price, defaults) are likely to change."
+
+---
+
 ## 📋 DESIGN PATTERNS — FINAL IMPLEMENTATION SUMMARY
 
 | Pattern | Status | Files | Problem Solved |
@@ -619,7 +709,7 @@ HotelReservationService service = new HotelReservationServiceImpl(store, publish
 | **Observer** | ✅ Done | `observer/` (5 files) | Decoupled notification — add channels without touching services |
 | **State** | ✅ Done | `state/` (5 files) | Enforced reservation lifecycle — invalid transitions throw immediately |
 | **Strategy** | ✅ Done | `strategy/` (3 files) | Pluggable room selection — swap algorithm at construction, zero service changes |
-| **Factory** | 🔲 v3 | — | Room type creation decoupled from service |
+| **Factory** | ✅ Done | `factory/` (5 files) | Room creation decoupled — type defaults (price, status) owned by factory, not callers |
 | **Decorator** | 🔲 v3 | — | Add retry/logging to notification without modifying observer classes |
 | **Chain of Responsibility** | 🔲 v3 | — | Validation pipeline: null → dates → availability → capacity |
 
